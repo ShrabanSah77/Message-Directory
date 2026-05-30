@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -13,15 +15,20 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Help
+import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -35,32 +42,32 @@ data class Directory(
     val id: String,
     val name: String,
     val icon: ImageVector,
-    val color: Color,
-    val messages: List<Message>
+    val colors: List<Color>,
+    val messages: MutableList<Message>
 )
 
 enum class Screen {
     Home, Dashboard, Profile, Messages, Settings, Notifications, EditProfile
 }
 
-// Mock Data
-val DIRECTORIES = listOf(
-    Directory("1", "You", Icons.Default.Person, Color(0xFFFF5722), listOf(
+// Global state for simplicity in this demo, usually you'd use a ViewModel
+val INITIAL_DIRECTORIES = listOf(
+    Directory("1", "You", Icons.Default.Person, listOf(Color(0xFFFF5722), Color(0xFFFF9800)), mutableListOf(
         Message("m1", "System", "Welcome to your personal directory!", "10:00 AM")
     )),
-    Directory("2", "Home", Icons.Default.Home, Color(0xFF81D4FA), listOf(
+    Directory("2", "Home", Icons.Default.Home, listOf(Color(0xFF81D4FA), Color(0xFF03A9F4)), mutableListOf(
         Message("m2", "Mom", "The dinner is ready.", "6:30 PM")
     )),
-    Directory("3", "Love", Icons.Default.Favorite, Color(0xFF2196F3), listOf(
+    Directory("3", "Love", Icons.Default.Favorite, listOf(Color(0xFFF48FB1), Color(0xFFE91E63)), mutableListOf(
         Message("m3", "Partner", "Love you!", "Yesterday")
     )),
-    Directory("4", "Family", Icons.Default.FamilyRestroom, Color(0xFF673AB7), listOf(
+    Directory("4", "Family", Icons.Default.FamilyRestroom, listOf(Color(0xFFB39DDB), Color(0xFF673AB7)), mutableListOf(
         Message("m4", "Dad", "Call me when you're free.", "2 days ago")
     )),
-    Directory("5", "Friends", Icons.Default.Groups, Color(0xFFE91E63), listOf(
+    Directory("5", "Friends", Icons.Default.Groups, listOf(Color(0xFFA5D6A7), Color(0xFF4CAF50)), mutableListOf(
         Message("m5", "John", "Are we still on for Friday?", "3 days ago")
     )),
-    Directory("6", "School", Icons.Default.School, Color(0xFF00BCD4), listOf(
+    Directory("6", "School", Icons.Default.School, listOf(Color(0xFF80DEEA), Color(0xFF00BCD4)), mutableListOf(
         Message("m6", "Professor", "The assignment deadline is extended.", "Last week")
     ))
 )
@@ -70,8 +77,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MessageDirectoryTheme {
-                MessageDirectoryApp()
+            var darkModeEnabled by remember { mutableStateOf(false) }
+            MessageDirectoryTheme(darkTheme = darkModeEnabled) {
+                MessageDirectoryApp(darkModeEnabled) { darkModeEnabled = it }
             }
         }
     }
@@ -79,7 +87,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MessageDirectoryApp() {
+fun MessageDirectoryApp(darkMode: Boolean, onDarkModeToggle: (Boolean) -> Unit) {
     var currentScreen by remember { mutableStateOf(Screen.Home) }
     var selectedDirectory by remember { mutableStateOf<Directory?>(null) }
     
@@ -87,11 +95,16 @@ fun MessageDirectoryApp() {
     var userName by remember { mutableStateOf("Alex Johnson") }
     var userEmail by remember { mutableStateOf("alex.johnson@example.com") }
     var notificationsEnabled by remember { mutableStateOf(true) }
-    var darkModeEnabled by remember { mutableStateOf(false) }
+    
+    // Search State
+    var searchQuery by remember { mutableStateOf("") }
+    
+    // Data State
+    val directories = remember { mutableStateListOf(*INITIAL_DIRECTORIES.toTypedArray()) }
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = { 
                     Text(
                         text = when (currentScreen) {
@@ -101,7 +114,8 @@ fun MessageDirectoryApp() {
                             Screen.EditProfile -> "Edit Profile"
                             else -> currentScreen.name
                         },
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 1.sp
                     ) 
                 },
                 navigationIcon = {
@@ -113,15 +127,25 @@ fun MessageDirectoryApp() {
                         }
                     }
                 },
+                actions = {
+                    if (currentScreen == Screen.Home) {
+                        IconButton(onClick = { /* Sort or Filter */ }) {
+                            Icon(Icons.Default.FilterList, contentDescription = "Filter")
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                    titleContentColor = MaterialTheme.colorScheme.primary
                 )
             )
         },
         bottomBar = {
-            if (currentScreen == Screen.Home || currentScreen == Screen.Dashboard || currentScreen == Screen.Profile) {
-                NavigationBar {
+            if (currentScreen in listOf(Screen.Home, Screen.Dashboard, Screen.Profile)) {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 8.dp
+                ) {
                     NavigationBarItem(
                         icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
                         label = { Text("Home") },
@@ -142,6 +166,17 @@ fun MessageDirectoryApp() {
                     )
                 }
             }
+        },
+        floatingActionButton = {
+            if (currentScreen == Screen.Messages) {
+                FloatingActionButton(
+                    onClick = { /* Open Compose Dialog */ },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Compose")
+                }
+            }
         }
     ) { innerPadding ->
         Surface(
@@ -150,116 +185,226 @@ fun MessageDirectoryApp() {
                 .padding(innerPadding),
             color = MaterialTheme.colorScheme.background
         ) {
-            when (currentScreen) {
-                Screen.Home -> DirectoryGrid { 
-                    selectedDirectory = it
-                    currentScreen = Screen.Messages
+            Crossfade(targetState = currentScreen, label = "ScreenTransition") { screen ->
+                when (screen) {
+                    Screen.Home -> DirectoryList(
+                        directories = directories,
+                        searchQuery = searchQuery,
+                        onSearchChange = { searchQuery = it },
+                        onDirectoryClick = { 
+                            selectedDirectory = it
+                            currentScreen = Screen.Messages
+                        }
+                    )
+                    Screen.Messages -> MessageList(
+                        directory = selectedDirectory,
+                        onDeleteMessage = { msgId ->
+                            selectedDirectory?.messages?.removeIf { it.id == msgId }
+                        }
+                    )
+                    Screen.Dashboard -> DashboardScreen(directories)
+                    Screen.Profile -> ProfileScreen(
+                        name = userName,
+                        email = userEmail,
+                        onEditProfile = { currentScreen = Screen.EditProfile },
+                        onNavigateToSettings = { currentScreen = Screen.Settings },
+                        onNavigateToNotifications = { currentScreen = Screen.Notifications }
+                    )
+                    Screen.EditProfile -> EditProfileScreen(
+                        currentName = userName,
+                        currentEmail = userEmail,
+                        onSave = { name, email ->
+                            userName = name
+                            userEmail = email
+                            currentScreen = Screen.Profile
+                        },
+                        onCancel = { currentScreen = Screen.Profile }
+                    )
+                    Screen.Settings -> SettingsScreen(
+                        darkMode = darkMode,
+                        onDarkModeChange = onDarkModeToggle
+                    )
+                    Screen.Notifications -> NotificationsScreen(
+                        enabled = notificationsEnabled,
+                        onToggle = { notificationsEnabled = it }
+                    )
                 }
-                Screen.Messages -> MessageList(messages = selectedDirectory?.messages ?: emptyList())
-                Screen.Dashboard -> DashboardScreen()
-                Screen.Profile -> ProfileScreen(
-                    name = userName,
-                    email = userEmail,
-                    onEditProfile = { currentScreen = Screen.EditProfile },
-                    onNavigateToSettings = { currentScreen = Screen.Settings },
-                    onNavigateToNotifications = { currentScreen = Screen.Notifications }
-                )
-                Screen.EditProfile -> EditProfileScreen(
-                    currentName = userName,
-                    currentEmail = userEmail,
-                    onSave = { name, email ->
-                        userName = name
-                        userEmail = email
-                        currentScreen = Screen.Profile
-                    },
-                    onCancel = { currentScreen = Screen.Profile }
-                )
-                Screen.Settings -> SettingsScreen(
-                    darkMode = darkModeEnabled,
-                    onDarkModeChange = { darkModeEnabled = it }
-                )
-                Screen.Notifications -> NotificationsScreen(
-                    enabled = notificationsEnabled,
-                    onToggle = { notificationsEnabled = it }
-                )
             }
         }
     }
 }
 
 @Composable
-fun DirectoryGrid(onDirectoryClick: (Directory) -> Unit) {
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
-        contentPadding = PaddingValues(24.dp),
-        horizontalArrangement = Arrangement.spacedBy(24.dp),
-        verticalArrangement = Arrangement.spacedBy(32.dp),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        items(DIRECTORIES) { directory ->
-            DirectoryItem(directory, onDirectoryClick)
+fun DirectoryList(
+    directories: List<Directory>,
+    searchQuery: String,
+    onSearchChange: (String) -> Unit,
+    onDirectoryClick: (Directory) -> Unit
+) {
+    val filteredDirectories = remember(searchQuery, directories) {
+        if (searchQuery.isEmpty()) directories
+        else directories.filter { it.name.contains(searchQuery, ignoreCase = true) }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            placeholder = { Text("Search directories...") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            shape = RoundedCornerShape(24.dp),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent
+            ),
+            singleLine = true
+        )
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            contentPadding = PaddingValues(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            items(filteredDirectories, key = { it.id }) { directory ->
+                DirectoryItem(directory, onDirectoryClick)
+            }
         }
     }
 }
 
 @Composable
 fun DirectoryItem(directory: Directory, onClick: (Directory) -> Unit) {
+    var isPressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (isPressed) 0.92f else 1f, label = "Scale")
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable { onClick(directory) }
+        modifier = Modifier
+            .scale(scale)
+            .clickable(
+                onClick = { onClick(directory) }
+            )
     ) {
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(100.dp)
-                .shadow(elevation = 8.dp, shape = CircleShape)
-                .background(directory.color, CircleShape)
+                .size(110.dp)
+                .shadow(elevation = 12.dp, shape = CircleShape)
+                .background(
+                    brush = Brush.verticalGradient(directory.colors),
+                    shape = CircleShape
+                )
         ) {
             Icon(
                 imageVector = directory.icon,
                 contentDescription = directory.name,
                 tint = Color.White,
-                modifier = Modifier.size(48.dp)
+                modifier = Modifier.size(44.dp)
             )
         }
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = directory.name,
             fontSize = 18.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = directory.color
+            fontWeight = FontWeight.Bold,
+            color = directory.colors.last(),
+            letterSpacing = 0.5.sp
         )
     }
 }
 
 @Composable
-fun MessageList(messages: List<Message>) {
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        items(messages) { message ->
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+fun MessageList(directory: Directory?, onDeleteMessage: (String) -> Unit) {
+    val messages = directory?.messages ?: emptyList()
+    
+    if (messages.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("No messages in this directory.", color = Color.Gray)
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(messages, key = { it.id }) { message ->
+                MessageItem(message, onDeleteMessage)
+            }
+        }
+    }
+}
+
+@Composable
+fun MessageItem(message: Message, onDeleteMessage: (String) -> Unit) {
+    var showDelete by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { showDelete = !showDelete }
+            .animateContentSize(),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        modifier = Modifier.size(32.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer
                     ) {
-                        Text(
-                            text = message.sender,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = message.time,
-                            fontSize = 12.sp,
-                            color = Color.Gray
-                        )
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = message.sender.take(1),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = message.content, fontSize = 16.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = message.sender,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+                Text(
+                    text = message.time,
+                    fontSize = 12.sp,
+                    color = Color.Gray
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = message.content,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            if (showDelete) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(
+                        onClick = { onDeleteMessage(message.id) },
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Delete")
+                    }
                 }
             }
         }
@@ -267,46 +412,102 @@ fun MessageList(messages: List<Message>) {
 }
 
 @Composable
-fun DashboardScreen() {
-    Column(
+fun DashboardScreen(directories: List<Directory>) {
+    val totalMessages = directories.sumOf { it.messages.size }
+
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text("Activity Dashboard", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            StatCard("Total Messages", "24", Modifier.weight(1f))
-            StatCard("New Today", "5", Modifier.weight(1f))
+        item {
+            Text(
+                "Overview",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Black
+            )
         }
-        Spacer(modifier = Modifier.height(16.dp))
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("Storage Usage", fontWeight = FontWeight.Bold)
-                LinearProgressIndicator(
-                    progress = { 0.45f },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        
+        item {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatCard(
+                    label = "Total Folders",
+                    value = directories.size.toString(),
+                    icon = Icons.Default.Folder,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
                 )
-                Text("4.5 GB of 10 GB used", fontSize = 12.sp)
+                StatCard(
+                    label = "Messages",
+                    value = totalMessages.toString(),
+                    icon = Icons.AutoMirrored.Filled.Message,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Storage, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Cloud Storage", fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    LinearProgressIndicator(
+                        progress = { 0.45f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(CircleShape),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("4.5 GB of 10 GB used (45%)", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        
+        item {
+            Text("Folder Distribution", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+        }
+        
+        items(directories) { dir ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(modifier = Modifier.size(12.dp).background(dir.colors.first(), CircleShape))
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(dir.name, modifier = Modifier.weight(1f))
+                Text("${dir.messages.size} msgs", fontWeight = FontWeight.Medium)
             }
         }
     }
 }
 
 @Composable
-fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(modifier = modifier) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(text = label, fontSize = 12.sp, color = Color.Gray)
-            Text(text = value, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+fun StatCard(label: String, value: String, icon: ImageVector, color: Color, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.1f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(24.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(text = value, fontSize = 28.sp, fontWeight = FontWeight.Black, color = color)
+            Text(text = label, fontSize = 12.sp, color = color.copy(alpha = 0.7f))
         }
     }
 }
@@ -328,39 +529,57 @@ fun ProfileScreen(
         Box(
             modifier = Modifier
                 .size(120.dp)
-                .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(64.dp))
+            Icon(
+                Icons.Default.Person,
+                contentDescription = null,
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.onPrimaryContainer
+            )
         }
         Spacer(modifier = Modifier.height(16.dp))
-        Text(name, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text(name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
         Text(email, color = Color.Gray)
+        
+        Spacer(modifier = Modifier.height(24.dp))
         
         Button(
             onClick = onEditProfile,
-            modifier = Modifier.padding(top = 8.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            contentPadding = PaddingValues(16.dp)
         ) {
             Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Edit Profile")
+            Text("Edit My Profile")
         }
         
         Spacer(modifier = Modifier.height(32.dp))
         
-        ProfileOption(Icons.Default.Settings, "Settings", onNavigateToSettings)
-        ProfileOption(Icons.Default.Notifications, "Notifications", onNavigateToNotifications)
-        ProfileOption(Icons.Default.Security, "Privacy & Security") {}
-        ProfileOption(Icons.AutoMirrored.Filled.Help, "Help & Support") {}
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+        ) {
+            Column(modifier = Modifier.padding(8.dp)) {
+                ProfileOption(Icons.Default.Settings, "Settings", onNavigateToSettings)
+                ProfileOption(Icons.Default.Notifications, "Notifications", onNavigateToNotifications)
+                ProfileOption(Icons.Default.Security, "Privacy & Security") {}
+                ProfileOption(Icons.AutoMirrored.Filled.Help, "Help & Support") {}
+            }
+        }
         
         Spacer(modifier = Modifier.weight(1f))
-        Button(
+        
+        TextButton(
             onClick = { /* Logout */ },
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
         ) {
-            Text("Logout")
+            Text("Sign Out", fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -379,25 +598,31 @@ fun EditProfileScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
             label = { Text("Full Name") },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            leadingIcon = { Icon(Icons.Default.Badge, contentDescription = null) }
         )
-        Spacer(modifier = Modifier.height(16.dp))
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
             label = { Text("Email Address") },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) }
         )
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(16.dp))
         Button(
             onClick = { onSave(name, email) },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            contentPadding = PaddingValues(16.dp)
         ) {
             Text("Save Changes")
         }
@@ -412,36 +637,67 @@ fun EditProfileScreen(
 
 @Composable
 fun SettingsScreen(darkMode: Boolean, onDarkModeChange: (Boolean) -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text("Dark Mode", fontSize = 18.sp)
-            Switch(checked = darkMode, onCheckedChange = onDarkModeChange)
+    Column(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SettingsToggle(
+            title = "Dark Appearance",
+            subtitle = "Enable night theme across the app",
+            checked = darkMode,
+            onCheckedChange = onDarkModeChange,
+            icon = Icons.Default.DarkMode
+        )
+        
+        HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+        
+        Text("Account Settings", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        ProfileOption(Icons.Default.Language, "Language") {}
+        ProfileOption(Icons.Default.CloudUpload, "Cloud Backup") {}
+        
+        Spacer(modifier = Modifier.weight(1f))
+        Text("Version 1.0.8 (Stable)", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontSize = 12.sp, color = Color.Gray)
+    }
+}
+
+@Composable
+fun SettingsToggle(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, icon: ImageVector) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.width(16.dp))
+            Column {
+                Text(title, fontWeight = FontWeight.Bold)
+                Text(subtitle, fontSize = 12.sp, color = Color.Gray)
+            }
         }
-        HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-        Text("Language", fontSize = 18.sp)
-        Text("English (United States)", fontSize = 14.sp, color = Color.Gray)
-        HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-        Text("Version", fontSize = 18.sp)
-        Text("1.0.4", fontSize = 14.sp, color = Color.Gray)
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 
 @Composable
 fun NotificationsScreen(enabled: Boolean, onToggle: (Boolean) -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-        Row(
+    Column(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        SettingsToggle(
+            title = "Push Notifications",
+            subtitle = "Get alerted when new messages arrive",
+            checked = enabled,
+            onCheckedChange = onToggle,
+            icon = Icons.Default.NotificationsActive
+        )
+        
+        Card(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
         ) {
-            Text("Push Notifications", fontSize = 18.sp)
-            Switch(checked = enabled, onCheckedChange = onToggle)
+            Text(
+                "Note: System-level notifications must also be enabled in your device settings.",
+                modifier = Modifier.padding(16.dp),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
         }
-        Text("Receive updates about new messages and activity", fontSize = 14.sp, color = Color.Gray)
     }
 }
 
@@ -450,14 +706,15 @@ fun ProfileOption(icon: ImageVector, label: String, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
             .clickable { onClick() }
-            .padding(vertical = 12.dp),
+            .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
         Spacer(modifier = Modifier.width(16.dp))
         Text(label, fontSize = 16.sp, fontWeight = FontWeight.Medium)
         Spacer(modifier = Modifier.weight(1f))
-        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.LightGray)
+        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color.LightGray, modifier = Modifier.size(16.dp))
     }
 }
