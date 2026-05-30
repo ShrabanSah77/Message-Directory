@@ -6,8 +6,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.automirrored.filled.Message
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -35,9 +38,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.message_directory.ui.theme.MessageDirectoryTheme
+import java.util.UUID
 
 // Data Models
-data class Message(val id: String, val sender: String, val content: String, val time: String)
+data class Message(val id: String, val sender: String, val content: String, val time: String, val timestamp: Long = System.currentTimeMillis())
 data class Directory(
     val id: String,
     val name: String,
@@ -50,7 +54,7 @@ enum class Screen {
     Home, Dashboard, Profile, Messages, Settings, Notifications, EditProfile
 }
 
-// Global state for simplicity in this demo, usually you'd use a ViewModel
+// Global state for simplicity in this demo
 val INITIAL_DIRECTORIES = listOf(
     Directory("1", "You", Icons.Default.Person, listOf(Color(0xFFFF5722), Color(0xFFFF9800)), mutableListOf(
         Message("m1", "System", "Welcome to your personal directory!", "10:00 AM")
@@ -96,8 +100,10 @@ fun MessageDirectoryApp(darkMode: Boolean, onDarkModeToggle: (Boolean) -> Unit) 
     var userEmail by remember { mutableStateOf("alex.johnson@example.com") }
     var notificationsEnabled by remember { mutableStateOf(true) }
     
-    // Search State
+    // Home State
     var searchQuery by remember { mutableStateOf("") }
+    var sortAscending by remember { mutableStateOf(true) }
+    var showAddDirectoryDialog by remember { mutableStateOf(false) }
     
     // Data State
     val directories = remember { mutableStateListOf(*INITIAL_DIRECTORIES.toTypedArray()) }
@@ -129,8 +135,11 @@ fun MessageDirectoryApp(darkMode: Boolean, onDarkModeToggle: (Boolean) -> Unit) 
                 },
                 actions = {
                     if (currentScreen == Screen.Home) {
-                        IconButton(onClick = { /* Sort or Filter */ }) {
-                            Icon(Icons.Default.FilterList, contentDescription = "Filter")
+                        IconButton(onClick = { sortAscending = !sortAscending }) {
+                            Icon(
+                                if (sortAscending) Icons.Default.SortByAlpha else Icons.AutoMirrored.Filled.Sort,
+                                contentDescription = "Sort"
+                            )
                         }
                     }
                 },
@@ -168,7 +177,14 @@ fun MessageDirectoryApp(darkMode: Boolean, onDarkModeToggle: (Boolean) -> Unit) 
             }
         },
         floatingActionButton = {
-            if (currentScreen == Screen.Messages) {
+            if (currentScreen == Screen.Home) {
+                FloatingActionButton(
+                    onClick = { showAddDirectoryDialog = true },
+                    containerColor = MaterialTheme.colorScheme.primary
+                ) {
+                    Icon(Icons.Default.CreateNewFolder, contentDescription = "Add Directory")
+                }
+            } else if (currentScreen == Screen.Messages) {
                 FloatingActionButton(
                     onClick = { /* Open Compose Dialog */ },
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -190,10 +206,14 @@ fun MessageDirectoryApp(darkMode: Boolean, onDarkModeToggle: (Boolean) -> Unit) 
                     Screen.Home -> DirectoryList(
                         directories = directories,
                         searchQuery = searchQuery,
+                        sortAscending = sortAscending,
                         onSearchChange = { searchQuery = it },
                         onDirectoryClick = { 
                             selectedDirectory = it
                             currentScreen = Screen.Messages
+                        },
+                        onDeleteDirectory = { dirId ->
+                            directories.removeIf { it.id == dirId }
                         }
                     )
                     Screen.Messages -> MessageList(
@@ -232,18 +252,69 @@ fun MessageDirectoryApp(darkMode: Boolean, onDarkModeToggle: (Boolean) -> Unit) 
             }
         }
     }
+
+    if (showAddDirectoryDialog) {
+        AddDirectoryDialog(
+            onDismiss = { showAddDirectoryDialog = false },
+            onConfirm = { name ->
+                directories.add(
+                    Directory(
+                        id = UUID.randomUUID().toString(),
+                        name = name,
+                        icon = Icons.Default.Folder,
+                        colors = listOf(Color.Gray, Color.DarkGray),
+                        messages = mutableListOf()
+                    )
+                )
+                showAddDirectoryDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+fun AddDirectoryDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New Directory") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Directory Name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            Button(onClick = { if (name.isNotBlank()) onConfirm(name) }) {
+                Text("Create")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable
 fun DirectoryList(
     directories: List<Directory>,
     searchQuery: String,
+    sortAscending: Boolean,
     onSearchChange: (String) -> Unit,
-    onDirectoryClick: (Directory) -> Unit
+    onDirectoryClick: (Directory) -> Unit,
+    onDeleteDirectory: (String) -> Unit
 ) {
-    val filteredDirectories = remember(searchQuery, directories) {
-        if (searchQuery.isEmpty()) directories
+    val filteredDirectories = remember(searchQuery, directories, sortAscending) {
+        val filtered = if (searchQuery.isEmpty()) directories
         else directories.filter { it.name.contains(searchQuery, ignoreCase = true) }
+        
+        if (sortAscending) filtered.sortedBy { it.name }
+        else filtered.sortedByDescending { it.name }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -255,68 +326,101 @@ fun DirectoryList(
                 .padding(16.dp),
             placeholder = { Text("Search directories...") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { onSearchChange("") }) {
+                        Icon(Icons.Default.Close, contentDescription = "Clear")
+                    }
+                }
+            },
             shape = RoundedCornerShape(24.dp),
             colors = TextFieldDefaults.colors(
                 focusedContainerColor = MaterialTheme.colorScheme.surface,
                 unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                focusedIndicatorColor = Color.Transparent,
+                focusedIndicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
                 unfocusedIndicatorColor = Color.Transparent
             ),
             singleLine = true
         )
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            contentPadding = PaddingValues(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            items(filteredDirectories, key = { it.id }) { directory ->
-                DirectoryItem(directory, onDirectoryClick)
+        if (filteredDirectories.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.SearchOff, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color.LightGray)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("No directories found", color = Color.Gray)
+                }
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                contentPadding = PaddingValues(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(filteredDirectories, key = { it.id }) { directory ->
+                    DirectoryItem(directory, onDirectoryClick, onDeleteDirectory)
+                }
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun DirectoryItem(directory: Directory, onClick: (Directory) -> Unit) {
+fun DirectoryItem(directory: Directory, onClick: (Directory) -> Unit, onDelete: (String) -> Unit) {
     var isPressed by remember { mutableStateOf(false) }
+    var showDeleteMenu by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (isPressed) 0.92f else 1f, label = "Scale")
 
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .scale(scale)
-            .clickable(
-                onClick = { onClick(directory) }
-            )
-    ) {
-        Box(
-            contentAlignment = Alignment.Center,
+    Box {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
-                .size(110.dp)
-                .shadow(elevation = 12.dp, shape = CircleShape)
-                .background(
-                    brush = Brush.verticalGradient(directory.colors),
-                    shape = CircleShape
+                .scale(scale)
+                .combinedClickable(
+                    onClick = { onClick(directory) },
+                    onLongClick = { showDeleteMenu = true }
                 )
         ) {
-            Icon(
-                imageVector = directory.icon,
-                contentDescription = directory.name,
-                tint = Color.White,
-                modifier = Modifier.size(44.dp)
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(110.dp)
+                    .shadow(elevation = 12.dp, shape = CircleShape)
+                    .background(
+                        brush = Brush.verticalGradient(directory.colors),
+                        shape = CircleShape
+                    )
+            ) {
+                Icon(
+                    imageVector = directory.icon,
+                    contentDescription = directory.name,
+                    tint = Color.White,
+                    modifier = Modifier.size(44.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = directory.name,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = directory.colors.last(),
+                letterSpacing = 0.5.sp
             )
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            text = directory.name,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            color = directory.colors.last(),
-            letterSpacing = 0.5.sp
-        )
+
+        DropdownMenu(expanded = showDeleteMenu, onDismissRequest = { showDeleteMenu = false }) {
+            DropdownMenuItem(
+                text = { Text("Delete") },
+                onClick = {
+                    onDelete(directory.id)
+                    showDeleteMenu = false
+                },
+                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) }
+            )
+        }
     }
 }
 
@@ -414,6 +518,18 @@ fun MessageItem(message: Message, onDeleteMessage: (String) -> Unit) {
 @Composable
 fun DashboardScreen(directories: List<Directory>) {
     val totalMessages = directories.sumOf { it.messages.size }
+    val recentMessages = remember(directories) {
+        directories.flatMap { it.messages }.sortedByDescending { it.timestamp }.take(5)
+    }
+    
+    var dashboardSearchQuery by remember { mutableStateOf("") }
+    val globalSearchResults = remember(dashboardSearchQuery, directories) {
+        if (dashboardSearchQuery.isBlank()) emptyList()
+        else directories.flatMap { dir -> 
+            dir.messages.filter { it.content.contains(dashboardSearchQuery, ignoreCase = true) || it.sender.contains(dashboardSearchQuery, ignoreCase = true) }
+                .map { dir.name to it }
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -423,10 +539,80 @@ fun DashboardScreen(directories: List<Directory>) {
     ) {
         item {
             Text(
-                "Overview",
+                "Analytics",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Black
             )
+        }
+
+        // --- NEW: Quick Folders (Horizontal Scroll) ---
+        item {
+            Text("Quick Access", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+            androidx.compose.foundation.lazy.LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(vertical = 8.dp)
+            ) {
+                items(directories) { dir ->
+                    Surface(
+                        modifier = Modifier
+                            .width(80.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { /* Could navigate to Messages directly if we had a navigation callback */ },
+                        color = dir.colors.first().copy(alpha = 0.1f)
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(8.dp)
+                        ) {
+                            Icon(dir.icon, contentDescription = null, tint = dir.colors.first(), modifier = Modifier.size(24.dp))
+                            Text(dir.name, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Global Search ---
+        item {
+            OutlinedTextField(
+                value = dashboardSearchQuery,
+                onValueChange = { dashboardSearchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Search all messages...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (dashboardSearchQuery.isNotEmpty()) {
+                        IconButton(onClick = { dashboardSearchQuery = "" }) {
+                            Icon(Icons.Default.Clear, contentDescription = null)
+                        }
+                    }
+                },
+                shape = RoundedCornerShape(16.dp),
+                singleLine = true
+            )
+        }
+
+        if (dashboardSearchQuery.isNotEmpty()) {
+            item {
+                Text("Search Results (${globalSearchResults.size})", fontWeight = FontWeight.Bold)
+            }
+            if (globalSearchResults.isEmpty()) {
+                item { Text("No messages match your search.", color = Color.Gray) }
+            } else {
+                items(globalSearchResults) { (dirName, msg) ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f))
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(text = "In $dirName", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            Text(text = "${msg.sender}: ${msg.content}", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+            item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
         }
         
         item {
@@ -445,6 +631,68 @@ fun DashboardScreen(directories: List<Directory>) {
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.weight(1f)
                 )
+            }
+        }
+
+        // --- NEW: Weekly Activity Chart (Dummy) ---
+        item {
+            Text("Weekly Activity", fontWeight = FontWeight.Bold)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .height(100.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    val days = listOf("M", "T", "W", "T", "F", "S", "S")
+                    val values = listOf(0.4f, 0.7f, 0.5f, 0.9f, 0.6f, 0.3f, 0.4f)
+                    days.forEachIndexed { index, day ->
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                modifier = Modifier
+                                    .width(12.dp)
+                                    .fillMaxHeight(values[index])
+                                    .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                    .background(MaterialTheme.colorScheme.primary)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(day, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Text("Recent Messages", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+        }
+
+        if (recentMessages.isEmpty()) {
+            item {
+                Text("No recent messages.", color = Color.Gray, style = MaterialTheme.typography.bodyMedium)
+            }
+        } else {
+            items(recentMessages) { msg ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                ) {
+                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.Gray)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("${msg.sender}: ${msg.content.take(30)}...", style = MaterialTheme.typography.bodySmall)
+                            Text(msg.time, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        }
+                    }
+                }
             }
         }
         
@@ -481,16 +729,26 @@ fun DashboardScreen(directories: List<Directory>) {
         }
         
         items(directories) { dir ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(modifier = Modifier.size(12.dp).background(dir.colors.first(), CircleShape))
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(dir.name, modifier = Modifier.weight(1f))
-                Text("${dir.messages.size} msgs", fontWeight = FontWeight.Medium)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(modifier = Modifier.size(12.dp).background(dir.colors.first(), CircleShape))
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(dir.name, modifier = Modifier.weight(1f))
+                    Text("${dir.messages.size} msgs", fontWeight = FontWeight.Medium)
+                }
+                val ratio = if (totalMessages == 0) 0f else dir.messages.size.toFloat() / totalMessages
+                LinearProgressIndicator(
+                    progress = { ratio },
+                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
+                    color = dir.colors.first(),
+                    trackColor = dir.colors.first().copy(alpha = 0.1f)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
             }
         }
     }
