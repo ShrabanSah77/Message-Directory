@@ -17,9 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -37,9 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.message_directory.ui.theme.MessageDirectoryTheme
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.UUID
+import java.util.*
 
 // --- Models ---
 data class Message(
@@ -48,7 +44,8 @@ data class Message(
     val content: String,
     val time: String = SimpleDateFormat("HH:mm a", Locale.getDefault()).format(Date()),
     val timestamp: Long = System.currentTimeMillis(),
-    val type: MessageType = MessageType.TEXT
+    val type: MessageType = MessageType.TEXT,
+    var isImportant: Boolean = false
 )
 
 enum class MessageType { TEXT, SYSTEM }
@@ -94,20 +91,21 @@ fun MessageDirectoryApp(darkMode: Boolean, onDarkModeToggle: (Boolean) -> Unit) 
     
     val directories = remember { 
         mutableStateListOf(
-            createDirectory("1", "Private", Icons.Default.Person, listOf(Color(0xFFFF5722), Color(0xFFFF9800)), "Security", true).apply {
-                messages.add(Message(sender = "System", content = "Encryption protocols fully active.", type = MessageType.SYSTEM))
+            createDirectory("1", "Security", Icons.Default.VpnKey, listOf(Color(0xFFFF5722), Color(0xFFFF9800)), "System", true).apply {
+                messages.add(Message(sender = "System", content = "Encryption layers established.", type = MessageType.SYSTEM, isImportant = true))
             },
             createDirectory("2", "Home Base", Icons.Default.Home, listOf(Color(0xFF4FC3F7), Color(0xFF0288D1)), "Living"),
-            createDirectory("3", "Social", Icons.Default.Groups, listOf(Color(0xFFF06292), Color(0xFFC2185B)), "Social"),
-            createDirectory("4", "Work Nodes", Icons.Default.Work, listOf(Color(0xFF9575CD), Color(0xFF512DA8)), "Professional", true),
-            createDirectory("5", "Archive", Icons.Default.Inventory, listOf(Color(0xFFAED581), Color(0xFF388E3C)), "System"),
-            createDirectory("6", "Alerts", Icons.Default.NotificationsActive, listOf(Color(0xFFFF8A65), Color(0xFFD84315)), "Security")
+            createDirectory("3", "Social Node", Icons.Default.Groups, listOf(Color(0xFFF06292), Color(0xFFC2185B)), "Social"),
+            createDirectory("4", "Work Core", Icons.Default.Work, listOf(Color(0xFF9575CD), Color(0xFF512DA8)), "Professional", true),
+            createDirectory("5", "Archives", Icons.Default.Inventory, listOf(Color(0xFFAED581), Color(0xFF388E3C)), "System"),
+            createDirectory("6", "Alerts", Icons.Default.NotificationsActive, listOf(Color(0xFFFF8A65), Color(0xFFD84315)), "System")
         )
     }
     
     var showAddDirDialog by remember { mutableStateOf(false) }
     var showAddMsgDialog by remember { mutableStateOf(false) }
     var homeSearchQuery by remember { mutableStateOf("") }
+    var homeCategoryFilter by remember { mutableStateOf("All") }
     var msgSearchQuery by remember { mutableStateOf("") }
 
     Scaffold(
@@ -131,15 +129,34 @@ fun MessageDirectoryApp(darkMode: Boolean, onDarkModeToggle: (Boolean) -> Unit) 
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
             Crossfade(targetState = currentScreen, label = "ScreenTransition") { screen ->
                 when (screen) {
-                    Screen.Home -> AdvancedHomeScreen(directories, homeSearchQuery, { homeSearchQuery = it }, { selectedDirectory = it; currentScreen = Screen.Messages }, { id ->
-                        val index = directories.indexOfFirst { it.id == id }
-                        if (index != -1) directories[index] = directories[index].copy(isPinned = !directories[index].isPinned)
-                    }, { id -> directories.removeIf { it.id == id } })
+                    Screen.Home -> AdvancedHomeScreen(
+                        directories, homeSearchQuery, homeCategoryFilter, 
+                        { homeSearchQuery = it }, { homeCategoryFilter = it },
+                        { selectedDirectory = it; currentScreen = Screen.Messages }, 
+                        { id -> 
+                            val idx = directories.indexOfFirst { it.id == id }
+                            if (idx != -1) directories[idx] = directories[idx].copy(isPinned = !directories[idx].isPinned)
+                        }, 
+                        { id -> directories.removeIf { it.id == id } }
+                    )
                     Screen.Dashboard -> AdvancedDashboard(directories) { currentScreen = Screen.AnalyticsDetails }
-                    Screen.Messages -> MessageDetailsScreen(selectedDirectory, msgSearchQuery, { msgSearchQuery = it }, { msgId -> selectedDirectory?.messages?.removeIf { it.id == msgId } })
+                    Screen.Messages -> MessageDetailsScreen(
+                        selectedDirectory, msgSearchQuery, { msgSearchQuery = it }, 
+                        { msgId -> 
+                            val msg = selectedDirectory?.messages?.find { it.id == msgId }
+                            msg?.let { it.isImportant = !it.isImportant }
+                            // Force refresh for SnapshotStateList
+                            val idx = selectedDirectory?.messages?.indexOfFirst { it.id == msgId } ?: -1
+                            if (idx != -1) {
+                                val m = selectedDirectory!!.messages[idx]
+                                selectedDirectory!!.messages[idx] = m.copy(isImportant = !m.isImportant)
+                            }
+                        },
+                        { msgId -> selectedDirectory?.messages?.removeIf { it.id == msgId } }
+                    )
                     Screen.Profile -> ProProfile(userName, userEmail, securityLevel) { currentScreen = it }
                     Screen.EditProfile -> EditProfileScreen(userName, userEmail, { n, e -> userName = n; userEmail = e; currentScreen = Screen.Profile }, { currentScreen = Screen.Profile })
-                    Screen.Settings -> SettingsScreen(darkMode, onDarkModeToggle)
+                    Screen.Settings -> SettingsScreen(darkMode, onDarkModeToggle) { directories.forEach { it.messages.clear() } }
                     Screen.Notifications -> NotificationsScreen()
                     Screen.Security -> SecurityScreen(securityLevel) { securityLevel = it }
                     Screen.AnalyticsDetails -> AnalyticsDetailsScreen(directories)
@@ -193,7 +210,7 @@ fun NexusTopBar(currentScreen: Screen, selectedDirectory: Directory?, onBack: ()
                 }
             },
             actions = {
-                IconButton(onClick = {}) { Icon(Icons.Default.VpnKey, "Security") }
+                IconButton(onClick = {}) { Icon(Icons.Default.Shield, "Security") }
                 IconButton(onClick = {}) { Icon(Icons.Default.CloudSync, "Sync") }
             }
         )
@@ -206,7 +223,7 @@ fun NexusBottomBar(currentScreen: Screen, onNavigate: (Screen) -> Unit) {
         val items = listOf(
             Triple(Screen.Home, Icons.Default.Hub, "CORE"),
             Triple(Screen.Dashboard, Icons.Default.Analytics, "INTEL"),
-            Triple(Screen.Profile, Icons.Default.Shield, "COMMAND")
+            Triple(Screen.Profile, Icons.Default.AccountCircle, "COMMAND")
         )
         items.forEach { (screen, icon, label) ->
             NavigationBarItem(
@@ -226,8 +243,8 @@ fun NexusFAB(currentScreen: Screen, onClick: () -> Unit) {
             onClick = onClick,
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
-            icon = { Icon(if (currentScreen == Screen.Home) Icons.Default.CreateNewFolder else Icons.Default.PostAdd, null) },
-            text = { Text(if (currentScreen == Screen.Home) "NEW NODE" else "ADD LOG") }
+            icon = { Icon(if (currentScreen == Screen.Home) Icons.Default.AddModerator else Icons.Default.PostAdd, null) },
+            text = { Text(if (currentScreen == Screen.Home) "INIT NODE" else "ADD LOG") }
         )
     }
 }
@@ -238,13 +255,16 @@ fun NexusFAB(currentScreen: Screen, onClick: () -> Unit) {
 fun AdvancedHomeScreen(
     dirs: List<Directory>,
     query: String,
+    categoryFilter: String,
     onSearch: (String) -> Unit,
+    onCategoryChange: (String) -> Unit,
     onClick: (Directory) -> Unit,
     onPin: (String) -> Unit,
     onDelete: (String) -> Unit
 ) {
     val pinned = dirs.filter { it.isPinned }
-    val others = dirs.filter { !it.isPinned && it.name.contains(query, true) }
+    val others = dirs.filter { !it.isPinned && it.name.contains(query, true) && (categoryFilter == "All" || it.category == categoryFilter) }
+    val categories = listOf("All", "System", "Living", "Social", "Professional")
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
@@ -254,20 +274,34 @@ fun AdvancedHomeScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item(span = { GridItemSpan(2) }) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = onSearch,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                placeholder = { Text("Search Encrypted Nodes...") },
-                leadingIcon = { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.primary) },
-                trailingIcon = { Icon(Icons.AutoMirrored.Filled.Sort, null) },
-                shape = RoundedCornerShape(16.dp),
-                singleLine = true,
-                colors = TextFieldDefaults.colors(focusedContainerColor = MaterialTheme.colorScheme.surface)
-            )
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onSearch,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    placeholder = { Text("Search Encrypted Nodes...") },
+                    leadingIcon = { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.primary) },
+                    trailingIcon = { Icon(Icons.AutoMirrored.Filled.Sort, null) },
+                    shape = RoundedCornerShape(16.dp),
+                    singleLine = true
+                )
+                LazyRow(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(categories) { cat ->
+                        FilterChip(
+                            selected = categoryFilter == cat,
+                            onClick = { onCategoryChange(cat) },
+                            label = { Text(cat) },
+                            shape = CircleShape
+                        )
+                    }
+                }
+            }
         }
 
-        if (pinned.isNotEmpty() && query.isEmpty()) {
+        if (pinned.isNotEmpty() && query.isEmpty() && categoryFilter == "All") {
             item(span = { GridItemSpan(2) }) { SectionHeader("PRIORITY PROTOCOLS") }
             item(span = { GridItemSpan(2) }) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -276,7 +310,7 @@ fun AdvancedHomeScreen(
             }
         }
 
-        item(span = { GridItemSpan(2) }) { SectionHeader("ACTIVE NODES") }
+        item(span = { GridItemSpan(2) }) { SectionHeader("ACTIVE NODES (${others.size})") }
         
         if (others.isEmpty() && pinned.isEmpty()) {
             item(span = { GridItemSpan(2) }) { EmptyState() }
@@ -319,7 +353,7 @@ fun DirectoryCircleItem(dir: Directory, onClick: (Directory) -> Unit, onPin: (St
             Spacer(Modifier.height(12.dp))
             Text(dir.name, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(dir.category.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-            Text("${dir.messages.size} LOGS", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            Text("${dir.messages.size} ENTRIES", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
         }
         
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -334,6 +368,9 @@ fun DirectoryCircleItem(dir: Directory, onClick: (Directory) -> Unit, onPin: (St
 @Composable
 fun AdvancedDashboard(dirs: List<Directory>, onDetailed: () -> Unit) {
     val total = dirs.sumOf { it.messages.size }
+    val important = dirs.flatMap { it.messages }.count { it.isImportant }
+    val recent = dirs.flatMap { it.messages }.sortedByDescending { it.timestamp }.take(3)
+
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item {
             Text("INTEL CENTER", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
@@ -343,7 +380,25 @@ fun AdvancedDashboard(dirs: List<Directory>, onDetailed: () -> Unit) {
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 IntelStatCard("NODES", dirs.size.toString(), Icons.Default.Hub, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-                IntelStatCard("TOTAL LOGS", total.toString(), Icons.Default.Description, MaterialTheme.colorScheme.secondary, Modifier.weight(1f))
+                IntelStatCard("STARRED", important.toString(), Icons.Default.Star, Color(0xFFFFD600), Modifier.weight(1f))
+            }
+        }
+
+        item { SectionHeader("RECENT SYSTEM ACTIVITY") }
+        if (recent.isEmpty()) {
+            item { Text("No recent logs detected.", color = Color.Gray, style = MaterialTheme.typography.bodySmall) }
+        } else {
+            items(recent) { msg ->
+                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), shape = RoundedCornerShape(12.dp)) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(8.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("${msg.sender}: ${msg.content.take(30)}...", style = MaterialTheme.typography.labelMedium)
+                            Text(msg.time, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        }
+                    }
+                }
             }
         }
 
@@ -403,7 +458,7 @@ fun IntelStatCard(label: String, value: String, icon: ImageVector, color: Color,
 // --- Messages ---
 
 @Composable
-fun MessageDetailsScreen(dir: Directory?, query: String, onSearch: (String) -> Unit, onDelete: (String) -> Unit) {
+fun MessageDetailsScreen(dir: Directory?, query: String, onSearch: (String) -> Unit, onStar: (String) -> Unit, onDelete: (String) -> Unit) {
     if (dir == null) return
     val filtered = dir.messages.filter { it.content.contains(query, true) }
     
@@ -429,7 +484,7 @@ fun MessageDetailsScreen(dir: Directory?, query: String, onSearch: (String) -> U
         )
         
         LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(filtered) { msg -> MessageItemPro(msg, onDelete) }
+            items(filtered) { msg -> MessageItemPro(msg, onStar, onDelete) }
             item { Spacer(Modifier.height(80.dp)) }
         }
     }
@@ -437,24 +492,27 @@ fun MessageDetailsScreen(dir: Directory?, query: String, onSearch: (String) -> U
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MessageItemPro(msg: Message, onDelete: (String) -> Unit) {
+fun MessageItemPro(msg: Message, onStar: (String) -> Unit, onDelete: (String) -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = { menu = true }),
         shape = RoundedCornerShape(topStart = 0.dp, topEnd = 20.dp, bottomEnd = 20.dp, bottomStart = 20.dp),
         colors = CardDefaults.cardColors(containerColor = if(msg.type == MessageType.SYSTEM) Color.Black.copy(0.04f) else MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(0.5f))
+        border = BorderStroke(1.dp, if(msg.isImportant) Color(0xFFFFD600) else MaterialTheme.colorScheme.outlineVariant.copy(0.5f))
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(msg.sender, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.weight(1f))
+                if (msg.isImportant) Icon(Icons.Default.Star, null, tint = Color(0xFFFFD600), modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(msg.time, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
             }
             Spacer(Modifier.height(8.dp))
             Text(msg.content, style = MaterialTheme.typography.bodyMedium)
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(text = { Text(if(msg.isImportant) "Unstar" else "Star Log") }, onClick = { onStar(msg.id); menu = false }, leadingIcon = { Icon(Icons.Default.Star, null) })
             DropdownMenuItem(text = { Text("Purge Log", color = Color.Red) }, onClick = { onDelete(msg.id); menu = false }, leadingIcon = { Icon(Icons.Default.Delete, null, tint = Color.Red) })
         }
     }
@@ -546,10 +604,14 @@ fun ProfileItem(icon: ImageVector, label: String, onClick: () -> Unit) {
     var cat by remember { mutableStateOf("System") }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("PROVISION NEW NODE") }, text = { Column { OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Node Designation") }, modifier = Modifier.fillMaxWidth()); Spacer(Modifier.height(16.dp)); Text("CLASSIFICATION"); Row { listOf("System", "Professional", "Personal").forEach { c -> FilterChip(selected = cat == c, onClick = { cat = c }, label = { Text(c) }) } } } }, confirmButton = { Button(onClick = { if(name.isNotBlank()) onConfirm(name, cat) }) { Text("PROVISION") } })
 }
-@Composable fun SettingsScreen(darkMode: Boolean, onToggle: (Boolean) -> Unit) = Column(Modifier.padding(24.dp)) { 
+@Composable fun SettingsScreen(darkMode: Boolean, onToggle: (Boolean) -> Unit, onClear: () -> Unit) = Column(Modifier.padding(24.dp)) { 
     Text("SYSTEM CONFIGURATION", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
     Spacer(Modifier.height(24.dp))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("STEALTH MODE (DARK)", fontWeight = FontWeight.Bold); Switch(darkMode, onToggle) }
+    Spacer(Modifier.height(16.dp))
+    Button(onClick = onClear, colors = ButtonDefaults.buttonColors(containerColor = Color.Red), modifier = Modifier.fillMaxWidth()) {
+        Text("PURGE ALL LOGS", fontWeight = FontWeight.Bold)
+    }
 }
 @Composable fun NotificationsScreen() = Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("SYSTEM QUIET - NO ALERTS") }
 @Composable fun SecurityScreen(curr: String, onLevel: (String) -> Unit) = Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) { Text("SECURITY ARCHITECTURE", fontWeight = FontWeight.Black); Text("CURRENT CLEARANCE: $curr", color = MaterialTheme.colorScheme.primary); listOf("Standard", "Advanced", "Elite").forEach { l -> Button(onClick = { onLevel(l) }, modifier = Modifier.fillMaxWidth()) { Text(l) } } }
